@@ -10,6 +10,11 @@
             "includePath": [
                 "D:/Code/Maker2026/include",
                 "D:/Code/Maker2026/src",
+                "D:/Code/Maker2026/.pio/libdeps/esp32devkitv1/DFRobot_LIS/src",
+                "D:/Code/Maker2026/.pio/libdeps/esp32devkitv1/Adafruit BusIO",
+                "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src",
+                "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
+                "D:/Code/Maker2026/.pio/libdeps/esp32devkitv1/Adafruit Unified Sensor",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/newlib/platform_include",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include/esp_additions/freertos",
@@ -228,7 +233,6 @@
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/RainMaker/src",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SD/src",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SD_MMC/src",
-                "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SPIFFS/src",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SimpleBLE/src",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/Ticker/src",
@@ -238,7 +242,6 @@
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/WiFiClientSecure/src",
                 "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/WiFiProv/src",
-                "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
                 ""
             ],
             "browse": {
@@ -246,6 +249,11 @@
                 "path": [
                     "D:/Code/Maker2026/include",
                     "D:/Code/Maker2026/src",
+                    "D:/Code/Maker2026/.pio/libdeps/esp32devkitv1/DFRobot_LIS/src",
+                    "D:/Code/Maker2026/.pio/libdeps/esp32devkitv1/Adafruit BusIO",
+                    "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src",
+                    "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
+                    "D:/Code/Maker2026/.pio/libdeps/esp32devkitv1/Adafruit Unified Sensor",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/newlib/platform_include",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/freertos/include/esp_additions/freertos",
@@ -464,7 +472,6 @@
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/RainMaker/src",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SD/src",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SD_MMC/src",
-                    "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SPIFFS/src",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/SimpleBLE/src",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/Ticker/src",
@@ -474,7 +481,6 @@
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/WiFiClientSecure/src",
                     "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/WiFiProv/src",
-                    "C:/Users/yinji/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src",
                     ""
                 ]
             },

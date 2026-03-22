@@ -1,140 +1,160 @@
 #include <Arduino.h>
+#include <Wire.h>
+#include <DFRobot_LIS2DW12.h>
 
 // ==========================================
-// 1. 引脚物理定义 (C 部分：巡线传感器)
+// 1. 终极无冲突引脚映射
 // ==========================================
-const int PIN_L = 34; // 左传感器 DO
-const int PIN_M = 13; // 中传感器 DO 
-const int PIN_R = 12; // 右传感器 DO 
+
+// --- A. 动力系统 (用可输出引脚) ---
+#define FL_A 27
+#define FL_B 26
+#define RL_A 4
+#define RL_B 5
+#define FR_A 15// 👈 右前轮 A (可输出)
+#define FR_B 2 // 👈 右前轮 B (可输出)
+#define RR_A 32
+#define RR_B 33
+
+// --- B. 感知矩阵 ---
+#define TRIG1 18 
+#define ECHO1 19
+#define TRIG2 12 
+#define ECHO2 13
+#define TRIG3 22 
+#define ECHO3 23
+
+#define I2C_SDA 14 
+#define I2C_SCL 25 
+
+// --- C. 巡线系统 (用仅输入引脚) ---
+#define LINE_L 34 // 👈 左巡线 (仅输入，完美！)
+#define LINE_M 21 
+#define LINE_R 35 // 👈 右巡线 (仅输入，完美！)
 
 // ==========================================
-// 2. 引脚物理定义 (A 部分：四驱电机控制引脚)
+// 2. 实例与变量
 // ==========================================
-// 前左 FL
-const int FL_A = 27;
-const int FL_B = 26;
-// 后左 RL
-const int RL_A = 4;
-const int RL_B = 5;
-// 前右 FR
-const int FR_A = 16;
-const int FR_B = 17;
-// 后右 RR
-const int RR_A = 32;
-const int RR_B = 33;
+DFRobot_LIS2DW12_I2C lis(&Wire, 0x19); 
+
+const int freq = 20000;
+const int resolution = 8;
+
+unsigned long noLineStartTime = 0; 
+bool forceUltrasoundMode = false;  
 
 // ==========================================
-// 3. PWM 通道映射 (旧版 ESP32 库必须手动绑定通道 0~7)
+// 3. 核心功能
 // ==========================================
-const int CH_FL_A = 0;
-const int CH_FL_B = 1;
-const int CH_RL_A = 2;
-const int CH_RL_B = 3;
-const int CH_FR_A = 4;
-const int CH_FR_B = 5;
-const int CH_RR_A = 6;
-const int CH_RR_B = 7;
-
-const int PWM_FREQ = 5000;  // 5 kHz 频率
-const int PWM_RES = 8;      // 8位分辨率 (0-255)
-
-// ==========================================
-// 4. 速度控制与巡线状态记忆
-// ==========================================
-const int BASE_SPEED = 200;    // 直线基础速度 (0~255)
-const int TURN_SPEED_HI = 180; // 转弯时，外侧轮高速
-const int TURN_SPEED_LO = 50;  // 转弯时，内侧轮低速
-
-// 状态记忆：0=未知，1=曾偏右（需向左修正），2=曾偏左（需向右修正）
-int last_state = 0; 
-
-// ==========================================
-// 5. 电机底层驱动函数 (基于通道控制)
-// ==========================================
-void setMotor(int chA, int chB, int speed) {
-  if (speed >= 0) {
-    ledcWrite(chA, speed); // 正转，通道 A 输出 PWM，通道 B 为 0
-    ledcWrite(chB, 0);
-  } else {
-    ledcWrite(chA, 0);
-    ledcWrite(chB, -speed); // 反转，通道 A 为 0，通道 B 输出 PWM
-  }
+float getDistance(int trig, int echo) {
+    digitalWrite(trig, LOW); delayMicroseconds(2);
+    digitalWrite(trig, HIGH); delayMicroseconds(10);
+    digitalWrite(trig, LOW);
+    long duration = pulseIn(echo, HIGH, 20000); 
+    if (duration == 0) return 999.0;
+    return duration / 58.2;
 }
 
-// 四驱差速控制：传入左侧、右侧轮子的目标速度
+float getPitch() {
+    float ay = lis.readAccY();
+    float az = lis.readAccZ();
+    return atan2(ay, az) * 180.0 / PI;
+}
+
 void drive(int leftSpeed, int rightSpeed) {
-  setMotor(CH_FL_A, CH_FL_B, leftSpeed);  // 前左
-  setMotor(CH_RL_A, CH_RL_B, leftSpeed);  // 后左
-  setMotor(CH_FR_A, CH_FR_B, rightSpeed); // 前右
-  setMotor(CH_RR_A, CH_RR_B, rightSpeed); // 后右
+    ledcWrite(0, leftSpeed > 0 ? leftSpeed : 0);
+    ledcWrite(1, leftSpeed < 0 ? -leftSpeed : 0);
+    ledcWrite(2, leftSpeed > 0 ? leftSpeed : 0);
+    ledcWrite(3, leftSpeed < 0 ? -leftSpeed : 0);
+
+    ledcWrite(4, rightSpeed > 0 ? rightSpeed : 0);
+    ledcWrite(5, rightSpeed < 0 ? -rightSpeed : 0);
+    ledcWrite(6, rightSpeed > 0 ? rightSpeed : 0);
+    ledcWrite(7, rightSpeed < 0 ? -rightSpeed : 0);
 }
 
 // ==========================================
-// 6. 系统初始化
+// 4. Setup
 // ==========================================
 void setup() {
-  Serial.begin(115200);
+    Serial.begin(115200);
 
-  // 初始化传感器
-  pinMode(PIN_L, INPUT);
-  pinMode(PIN_M, INPUT);
-  pinMode(PIN_R, INPUT);
+    pinMode(LINE_L, INPUT);
+    pinMode(LINE_M, INPUT);
+    pinMode(LINE_R, INPUT);
 
-  // 初始化 ESP32 旧版 PWM 硬件定时器和引脚绑定
-  ledcSetup(CH_FL_A, PWM_FREQ, PWM_RES); ledcAttachPin(FL_A, CH_FL_A);
-  ledcSetup(CH_FL_B, PWM_FREQ, PWM_RES); ledcAttachPin(FL_B, CH_FL_B);
+    for (int i = 0; i < 8; i++) ledcSetup(i, freq, resolution);
+    ledcAttachPin(FL_A, 0); ledcAttachPin(FL_B, 1);
+    ledcAttachPin(RL_A, 2); ledcAttachPin(RL_B, 3);
+    ledcAttachPin(FR_A, 4); ledcAttachPin(FR_B, 5);
+    ledcAttachPin(RR_A, 6); ledcAttachPin(RR_B, 7);
 
-  ledcSetup(CH_RL_A, PWM_FREQ, PWM_RES); ledcAttachPin(RL_A, CH_RL_A);
-  ledcSetup(CH_RL_B, PWM_FREQ, PWM_RES); ledcAttachPin(RL_B, CH_RL_B);
+    pinMode(TRIG1, OUTPUT); pinMode(ECHO1, INPUT);
+    pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
+    pinMode(TRIG3, OUTPUT); pinMode(ECHO3, INPUT);
 
-  ledcSetup(CH_FR_A, PWM_FREQ, PWM_RES); ledcAttachPin(FR_A, CH_FR_A);
-  ledcSetup(CH_FR_B, PWM_FREQ, PWM_RES); ledcAttachPin(FR_B, CH_FR_B);
+    Wire.begin(I2C_SDA, I2C_SCL); 
+    lis.begin();
 
-  ledcSetup(CH_RR_A, PWM_FREQ, PWM_RES); ledcAttachPin(RR_A, CH_RR_A);
-  ledcSetup(CH_RR_B, PWM_FREQ, PWM_RES); ledcAttachPin(RR_B, CH_RR_B);
-
-  Serial.println("4WD Line Follower Initialized (V2 API)!");
+    Serial.println("🏆 硬件引脚无冲突矩阵，全系统上线！");
 }
 
 // ==========================================
-// 7. 主循环巡线逻辑
+// 5. Loop (巡线紧凑型状态机)
 // ==========================================
 void loop() {
-  // 读取传感器
-  bool L = digitalRead(PIN_L);
-  bool M = digitalRead(PIN_M);
-  bool R = digitalRead(PIN_R);
+    bool L = digitalRead(LINE_L); 
+    bool M = digitalRead(LINE_M); 
+    bool R = digitalRead(LINE_R); 
 
-  // 状态机处理：假设传感器读取到黑线为 1，白纸为 0
-  if (!L && M && !R) {
-    // 0 1 0 : 正中，四轮全速前进
-    drive(BASE_SPEED, BASE_SPEED);
-    last_state = 0; 
-  } 
-  else if ((L && M && !R) || (L && !M && !R)) {
-    // 1 1 0 或 1 0 0 : 偏右了，需要向左拉
-    drive(TURN_SPEED_LO, TURN_SPEED_HI);
-    last_state = 1; 
-  } 
-  else if ((!L && M && R) || (!L && !M && R)) {
-    // 0 1 1 或 0 0 1 : 偏左了，需要向右拉
-    drive(TURN_SPEED_HI, TURN_SPEED_LO);
-    last_state = 2; 
-  } 
-  else if (!L && !M && !R) {
-    // 0 0 0 : 三个都悬空白纸，利用上一次的记忆往回拽
-    if (last_state == 1) {
-      drive(TURN_SPEED_LO - 20, TURN_SPEED_HI); 
-    } else if (last_state == 2) {
-      drive(TURN_SPEED_HI, TURN_SPEED_LO - 20); 
+    float distF = getDistance(TRIG1, ECHO1);
+    float distL = getDistance(TRIG2, ECHO2);
+    float distR = getDistance(TRIG3, ECHO3);
+    float pitch = getPitch();
+
+    int baseSpeed = 160; 
+    if (pitch > 10.0) baseSpeed = 220; 
+    else if (pitch < -10.0) baseSpeed = 100; 
+
+    int fast = baseSpeed;
+    int mid  = baseSpeed - 40;
+    int slow = baseSpeed - 80;
+
+    // 🕒 10秒倒计时逻辑
+    if (L || M || R) {
+        noLineStartTime = 0; 
+        forceUltrasoundMode = false; 
     } else {
-      drive(0, 0); // 若连记忆都没有，停车防跑丢
+        if (noLineStartTime == 0) noLineStartTime = millis(); 
+        if (millis() - noLineStartTime >= 10000) forceUltrasoundMode = true; 
     }
-  } 
-  else if (L && M && R) {
-    // 1 1 1 : 踩到横线（终点或T字路口）
-    drive(0, 0); 
-  }
 
-  delay(5); // 快速执行闭环计算
+    if (forceUltrasoundMode) {
+        // 纯超声波
+        if (distF < 25.0) {
+            drive(0, 0); delay(100);
+            if (distL > distR) drive(-150, 150); 
+            else drive(150, -150); 
+            delay(450); 
+        } else if (distL < 15.0) {
+            drive(baseSpeed, slow);
+        } else if (distR < 15.0) {
+            drive(slow, fast);
+        } else {
+            drive(baseSpeed, baseSpeed);
+        }
+    } else {
+        // 巡线模式
+        if (!L && M && !R) drive(baseSpeed, baseSpeed);
+        else if (L && M && !R) drive(mid, fast); 
+        else if (!L && M && R) drive(fast, mid);
+        else if (L && !M && !R) drive(slow, fast);
+        else if (!L && !M && R) drive(fast, slow);
+        else if (!L && !M && !R) drive(-110, 110); 
+        else drive(baseSpeed, baseSpeed);
+    }
+
+    Serial.printf("L:%d M:%d R:%d | F:%.1f | P:%.1f | %s\n", 
+                  L, M, R, distF, pitch, forceUltrasoundMode ? "ULTRA" : "LINE");
+    delay(10); 
 }
