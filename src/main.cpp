@@ -1,51 +1,45 @@
 #include <Arduino.h>
-#include <Wire.h>
-#include <DFRobot_LIS2DW12.h>
 
 // ==========================================
-// 1. 终极无冲突引脚映射
+// 1. 终极四驱引脚矩阵 (FR 锁定 15/2)
 // ==========================================
 
-// --- A. 动力系统 (用可输出引脚) ---
 #define FL_A 27
 #define FL_B 26
 #define RL_A 4
 #define RL_B 5
-#define FR_A 15// 👈 右前轮 A (可输出)
-#define FR_B 2 // 👈 右前轮 B (可输出)
+#define FR_A 15 // 右前 A
+#define FR_B 2  // 右前 B (自带蓝色 LED)
 #define RR_A 32
 #define RR_B 33
 
-// --- B. 感知矩阵 ---
-#define TRIG1 18 
+#define TRIG1 18 // 前
 #define ECHO1 19
-#define TRIG2 12 
+#define TRIG2 12 // 左
 #define ECHO2 13
-#define TRIG3 22 
+#define TRIG3 22 // 右
 #define ECHO3 23
 
-#define I2C_SDA 14 
-#define I2C_SCL 25 
-
-// --- C. 巡线系统 (用仅输入引脚) ---
-#define LINE_L 34 // 👈 左巡线 (仅输入，完美！)
-#define LINE_M 21 
-#define LINE_R 35 // 👈 右巡线 (仅输入，完美！)
+#define LINE_L 34 // D0 接 34 (用 ADC 读)
+#define LINE_M 21 // D0 接 21 (数字读取)
+#define LINE_R 35 // D0 接 35 (用 ADC 读)
 
 // ==========================================
-// 2. 实例与变量
+// 2. 配置与倒计时
 // ==========================================
-DFRobot_LIS2DW12_I2C lis(&Wire, 0x19); 
-
 const int freq = 20000;
 const int resolution = 8;
 
 unsigned long noLineStartTime = 0; 
 bool forceUltrasoundMode = false;  
 
+// 🎯 D0 信号的判定阈值。高于 2000 判定为高电平，低于 2000 为低电平。
+const int D0_THRESHOLD = 2000; 
+
 // ==========================================
-// 3. 核心功能
+// 3. 全时四驱底层函数
 // ==========================================
+
 float getDistance(int trig, int echo) {
     digitalWrite(trig, LOW); delayMicroseconds(2);
     digitalWrite(trig, HIGH); delayMicroseconds(10);
@@ -55,22 +49,16 @@ float getDistance(int trig, int echo) {
     return duration / 58.2;
 }
 
-float getPitch() {
-    float ay = lis.readAccY();
-    float az = lis.readAccZ();
-    return atan2(ay, az) * 180.0 / PI;
-}
-
 void drive(int leftSpeed, int rightSpeed) {
-    ledcWrite(0, leftSpeed > 0 ? leftSpeed : 0);
-    ledcWrite(1, leftSpeed < 0 ? -leftSpeed : 0);
-    ledcWrite(2, leftSpeed > 0 ? leftSpeed : 0);
-    ledcWrite(3, leftSpeed < 0 ? -leftSpeed : 0);
+    int l_fwd = leftSpeed > 0 ? leftSpeed : 0;
+    int l_rev = leftSpeed < 0 ? -leftSpeed : 0;
+    ledcWrite(0, l_fwd); ledcWrite(1, l_rev); 
+    ledcWrite(2, l_fwd); ledcWrite(3, l_rev); 
 
-    ledcWrite(4, rightSpeed > 0 ? rightSpeed : 0);
-    ledcWrite(5, rightSpeed < 0 ? -rightSpeed : 0);
-    ledcWrite(6, rightSpeed > 0 ? rightSpeed : 0);
-    ledcWrite(7, rightSpeed < 0 ? -rightSpeed : 0);
+    int r_fwd = rightSpeed > 0 ? rightSpeed : 0;
+    int r_rev = rightSpeed < 0 ? -rightSpeed : 0;
+    ledcWrite(4, r_fwd); ledcWrite(5, r_rev); 
+    ledcWrite(6, r_fwd); ledcWrite(7, r_rev); 
 }
 
 // ==========================================
@@ -93,34 +81,32 @@ void setup() {
     pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
     pinMode(TRIG3, OUTPUT); pinMode(ECHO3, INPUT);
 
-    Wire.begin(I2C_SDA, I2C_SCL); 
-    lis.begin();
-
-    Serial.println("🏆 硬件引脚无冲突矩阵，全系统上线！");
+    Serial.println("🔥 D0转模拟 终极全时四驱系统 Ready!");
 }
 
 // ==========================================
-// 5. Loop (巡线紧凑型状态机)
+// 5. Loop 主逻辑
 // ==========================================
 void loop() {
-    bool L = digitalRead(LINE_L); 
-    bool M = digitalRead(LINE_M); 
-    bool R = digitalRead(LINE_R); 
+    int rawL = analogRead(LINE_L);
+    int rawR = analogRead(LINE_R);
+    bool M  = digitalRead(LINE_M); 
+
+    bool L = (rawL > D0_THRESHOLD); 
+    bool R = (rawR > D0_THRESHOLD); 
 
     float distF = getDistance(TRIG1, ECHO1);
     float distL = getDistance(TRIG2, ECHO2);
     float distR = getDistance(TRIG3, ECHO3);
-    float pitch = getPitch();
 
-    int baseSpeed = 160; 
-    if (pitch > 10.0) baseSpeed = 220; 
-    else if (pitch < -10.0) baseSpeed = 100; 
+    // 🚀 1. 基础速度拉满 220！
+    int baseSpeed = 220; 
+    
+    // 🌪️ 2. 暴力差速矩阵
+    int maxSpeed = 255;    // 满速推背
+    int softDiff = 100;    // 轻微弯道降速
+    int hardRev  = -180;   // 急弯内侧轮【暴力反转】倒车！
 
-    int fast = baseSpeed;
-    int mid  = baseSpeed - 40;
-    int slow = baseSpeed - 80;
-
-    // 🕒 10秒倒计时逻辑
     if (L || M || R) {
         noLineStartTime = 0; 
         forceUltrasoundMode = false; 
@@ -130,31 +116,54 @@ void loop() {
     }
 
     if (forceUltrasoundMode) {
-        // 纯超声波
-        if (distF < 25.0) {
+        // 🦇 超声波迷宫（同样暴力四驱）
+        if (distF < 30.0) { 
             drive(0, 0); delay(100);
-            if (distL > distR) drive(-150, 150); 
-            else drive(150, -150); 
-            delay(450); 
-        } else if (distL < 15.0) {
-            drive(baseSpeed, slow);
-        } else if (distR < 15.0) {
-            drive(slow, fast);
+            if (distL > distR) drive(-180, 180); // 原地大马力左旋
+            else drive(180, -180); 
+            delay(350); 
+        } else if (distL < 20.0) {
+            drive(baseSpeed, softDiff); 
+        } else if (distR < 20.0) {
+            drive(softDiff, baseSpeed); 
         } else {
             drive(baseSpeed, baseSpeed);
         }
-    } else {
-        // 巡线模式
-        if (!L && M && !R) drive(baseSpeed, baseSpeed);
-        else if (L && M && !R) drive(mid, fast); 
-        else if (!L && M && R) drive(fast, mid);
-        else if (L && !M && !R) drive(slow, fast);
-        else if (!L && !M && R) drive(fast, slow);
-        else if (!L && !M && !R) drive(-110, 110); 
-        else drive(baseSpeed, baseSpeed);
+    } 
+    else {
+        // 🛣️ 紧凑型 AWD 暴力巡线状态机
+        
+        // A. 完美直行 (0 1 0)
+        if (!L && M && !R) {
+            drive(baseSpeed, baseSpeed); 
+        }
+        // B. 轻微偏右，微调左拐 (1 1 0)
+        else if (L && M && !R) {
+            drive(softDiff, maxSpeed); 
+        }
+        // C. 轻微偏左，微调右拐 (0 1 1)
+        else if (!L && M && R) {
+            drive(maxSpeed, softDiff); 
+        }
+        // D. 🚨 大幅偏右，强力【反转】左甩尾！ (1 0 0)
+        else if (L && !M && !R) {
+            drive(hardRev, maxSpeed); // 左轮往后倒，右轮往前冲！
+        }
+        // E. 🚨 大幅偏左，强力【反转】右甩尾！ (0 0 1)
+        else if (!L && !M && R) {
+            drive(maxSpeed, hardRev); // 右轮往后倒，左轮往前冲！
+        }
+        // F. 暂时脱轨 (0 0 0)
+        else if (!L && !M && !R) {
+            drive(-150, 150); // 暴力原地自旋盲搜
+        }
+        // G. 横线干扰 (1 1 1)
+        else {
+            drive(baseSpeed, baseSpeed); 
+        }
     }
 
-    Serial.printf("L:%d M:%d R:%d | F:%.1f | P:%.1f | %s\n", 
-                  L, M, R, distF, pitch, forceUltrasoundMode ? "ULTRA" : "LINE");
+    Serial.printf("L(ADC):%d M:%d R(ADC):%d | F:%.1f | %s\n", 
+                  rawL, M, rawR, distF, forceUltrasoundMode ? "ULTRA" : "LINE");
     delay(10); 
 }
