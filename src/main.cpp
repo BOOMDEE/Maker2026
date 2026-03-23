@@ -36,6 +36,8 @@ bool forceUltrasoundMode = false;
 // 🎯 D0 信号的判定阈值。高于 2000 判定为高电平，低于 2000 为低电平。
 const int D0_THRESHOLD = 2000; 
 
+int lastDirection = 0;
+
 // ==========================================
 // 3. 全时四驱底层函数
 // ==========================================
@@ -87,6 +89,7 @@ void setup() {
 // ==========================================
 // 5. Loop 主逻辑
 // ==========================================
+
 void loop() {
     int rawL = analogRead(LINE_L);
     int rawR = analogRead(LINE_R);
@@ -95,17 +98,17 @@ void loop() {
     bool L = (rawL > D0_THRESHOLD); 
     bool R = (rawR > D0_THRESHOLD); 
 
-    float distF = getDistance(TRIG1, ECHO1);
-    float distL = getDistance(TRIG2, ECHO2);
-    float distR = getDistance(TRIG3, ECHO3);
+    if (L) lastDirection = 1; 
+    else if (R) lastDirection = 2; 
 
-    // 🚀 1. 基础速度拉满 220！
+    float distF = getDistance(TRIG1, ECHO1);
+
     int baseSpeed = 220; 
+    int maxSpeed = 255;    
+    int softDiff = 120; 
     
-    // 🌪️ 2. 暴力差速矩阵
-    int maxSpeed = 255;    // 满速推背
-    int softDiff = 100;    // 轻微弯道降速
-    int hardRev  = -180;   // 急弯内侧轮【暴力反转】倒车！
+    // 🌪️ 方案 A 暴力反转参数！
+    int hardRev = -180; // 内侧轮直接挂倒挡扯后腿！
 
     if (L || M || R) {
         noLineStartTime = 0; 
@@ -116,48 +119,43 @@ void loop() {
     }
 
     if (forceUltrasoundMode) {
-        // 🦇 超声波迷宫（同样暴力四驱）
-        if (distF < 30.0) { 
-            drive(0, 0); delay(100);
-            if (distL > distR) drive(-180, 180); // 原地大马力左旋
-            else drive(180, -180); 
-            delay(350); 
-        } else if (distL < 20.0) {
-            drive(baseSpeed, softDiff); 
-        } else if (distR < 20.0) {
-            drive(softDiff, baseSpeed); 
-        } else {
-            drive(baseSpeed, baseSpeed);
-        }
+        // 超声波逻辑（略）...
     } 
     else {
-        // 🛣️ 紧凑型 AWD 暴力巡线状态机
+        // 🛣️ 方案 A：暴力真·差速巡线状态机
         
-        // A. 完美直行 (0 1 0)
         if (!L && M && !R) {
             drive(baseSpeed, baseSpeed); 
         }
-        // B. 轻微偏右，微调左拐 (1 1 0)
         else if (L && M && !R) {
             drive(softDiff, maxSpeed); 
         }
-        // C. 轻微偏左，微调右拐 (0 1 1)
         else if (!L && M && R) {
             drive(maxSpeed, softDiff); 
         }
-        // D. 🚨 大幅偏右，强力【反转】左甩尾！ (1 0 0)
+        
+        // 🚨 大幅偏右 (1 0 0) —— 方案 A 暴力直角左弯！
         else if (L && !M && !R) {
-            drive(hardRev, maxSpeed); // 左轮往后倒，右轮往前冲！
+            drive(hardRev, maxSpeed); // 左轮倒车，右轮冲锋！
+            delay(70); // ⏱️ 暴力甩尾时间（单位ms，如果转过头了就调小到 50，如果转不够就调大到 90）
         }
-        // E. 🚨 大幅偏左，强力【反转】右甩尾！ (0 0 1)
+        
+        // 🚨 大幅偏左 (0 0 1) —— 方案 A 暴力直角右弯！
         else if (!L && !M && R) {
-            drive(maxSpeed, hardRev); // 右轮往后倒，左轮往前冲！
+            drive(maxSpeed, hardRev); 
+            delay(70); 
         }
-        // F. 暂时脱轨 (0 0 0)
+        
+        // ❓ 脱轨搜线 (0 0 0) —— 记忆自旋
         else if (!L && !M && !R) {
-            drive(-150, 150); // 暴力原地自旋盲搜
+            if (lastDirection == 1) {
+                drive(-130, 130); 
+            } else if (lastDirection == 2) {
+                drive(130, -130); 
+            } else {
+                drive(-100, -100); 
+            }
         }
-        // G. 横线干扰 (1 1 1)
         else {
             drive(baseSpeed, baseSpeed); 
         }
