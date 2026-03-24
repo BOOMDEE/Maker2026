@@ -83,7 +83,7 @@ void setup() {
     pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
     pinMode(TRIG3, OUTPUT); pinMode(ECHO3, INPUT);
 
-    Serial.println("🔥 D0转模拟 终极全时四驱系统 Ready!");
+    Serial.println("🔥 Ready!");
 }
 
 // ==========================================
@@ -103,7 +103,7 @@ void loop() {
 
     float distF = getDistance(TRIG1, ECHO1);
 
-    int baseSpeed = 220; 
+    int baseSpeed = 200; 
     int maxSpeed = 255;    
     int softDiff = 120; 
     
