@@ -4,14 +4,14 @@
 // 1. 终极四驱引脚矩阵 (FR 锁定 15/2)
 // ==========================================
 
-#define FL_A 27
-#define FL_B 26
-#define RL_A 4
-#define RL_B 5
+#define FL_A 4
+#define FL_B 5
+#define RL_A 32
+#define RL_B 33
 #define FR_A 15 // 右前 A
 #define FR_B 2  // 右前 B (自带蓝色 LED)
-#define RR_A 32
-#define RR_B 33
+#define RR_A 16
+#define RR_B 17
 
 #define TRIG1 18 // 前
 #define ECHO1 19
