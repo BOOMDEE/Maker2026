@@ -1,217 +1,174 @@
 #include <Arduino.h>
 
 // ==========================================
-// 1. 终极四驱引脚矩阵 (FR 锁定 15/2)
+// 📋 A. 动力系统引脚矩阵
 // ==========================================
-
-#define FL_A 4
+#define FL_A 4    
 #define FL_B 5
-#define RL_A 32
-#define RL_B 33
-#define FR_A 15 // 右前 A
-#define FR_B 2  // 右前 B (自带蓝色 LED)
-#define RR_A 16
-#define RR_B 17
+#define RL_A 33   
+#define RL_B 32
+#define FR_A 15   
+#define FR_B 2
+#define RR_A 26   
+#define RR_B 27
 
-#define TRIG1 18 // 前
-#define ECHO1 19
-#define TRIG2 12 // 左
-#define ECHO2 13
-#define TRIG3 22 // 右
-#define ECHO3 23
+const int CH_FL_A = 0; const int CH_FL_B = 1;
+const int CH_RL_A = 2; const int CH_RL_B = 3;
+const int CH_FR_A = 4; const int CH_FR_B = 5;
+const int CH_RR_A = 6; const int CH_RR_B = 7;
 
-#define LINE_L 34 // ADC
-#define LINE_M 21 // 数字读取
-#define LINE_R 35 // ADC
-
-// ==========================================
-// 2. 全局配置与状态变量
-// ==========================================
 const int freq = 20000;
 const int resolution = 8;
 
-unsigned long noLineStartTime = 0; 
-bool forceUltrasoundMode = false;  
-
-const int D0_THRESHOLD = 2000; // ADC 阈值
-int lastDirection = 0; // 记忆：1代表最后偏左，2代表最后偏右
+// ==========================================
+// 📋 B. 感知矩阵引脚定义
+// ==========================================
+#define TRIG_F 18  
+#define ECHO_F 19
+#define TRIG_L 12  
+#define ECHO_L 13
+#define TRIG_R 22  
+#define ECHO_R 23
 
 // ==========================================
-// 3. 全时四驱底层驱动函数
+// 🚀 四驱狂暴狂飙参数【转向大幅度强化版】
 // ==========================================
+const int CRUISE_SPEED = 240;   // 空旷全速前冲
+const int BASE_SPEED   = 180;   // 靠墙巡航基速
 
-// 超声波读取函数
+// 【核心修改】将转向电机的反转与正转全部压榨到硬件极限 255！大力出奇迹！
+const int MAX_SPEED    = 255;   
+const int REV_SPEED    = -255;  
+
+// 物理界限定义
+const float LIMIT_FRONT = 7.0;  // 前方障碍红线
+const float LIMIT_SIDE  = 2.0;  // 侧边擦碰红线
+
+// ==========================================
+// 📏 超声波单路高频测距
+// ==========================================
 float getDistance(int trig, int echo) {
     digitalWrite(trig, LOW); delayMicroseconds(2);
     digitalWrite(trig, HIGH); delayMicroseconds(10);
     digitalWrite(trig, LOW);
-    long duration = pulseIn(echo, HIGH, 20000); // 20ms超时
-    if (duration == 0) return 999.0;
-    return duration / 58.2;
+    
+    long duration = pulseIn(echo, HIGH, 15000); 
+    if (duration == 0) return -1.0;            
+    return duration * 0.034 / 2.0;
 }
 
-// 核心驱动：支持四驱正反转
-void drive(int leftSpeed, int rightSpeed) {
+// ==========================================
+// 🏎️ 4WD 电机驱动
+// ==========================================
+void drive4WD(int leftSpeed, int rightSpeed) {
+    leftSpeed  = constrain(leftSpeed, -255, 255);
+    rightSpeed = constrain(rightSpeed, -255, 255);
+
     int l_fwd = leftSpeed > 0 ? leftSpeed : 0;
     int l_rev = leftSpeed < 0 ? -leftSpeed : 0;
-    ledcWrite(0, l_fwd); ledcWrite(1, l_rev); 
-    ledcWrite(2, l_fwd); ledcWrite(3, l_rev); 
+    ledcWrite(CH_FL_A, l_fwd); ledcWrite(CH_FL_B, l_rev);
+    ledcWrite(CH_RL_A, l_fwd); ledcWrite(CH_RL_B, l_rev);
 
     int r_fwd = rightSpeed > 0 ? rightSpeed : 0;
     int r_rev = rightSpeed < 0 ? -rightSpeed : 0;
-    ledcWrite(4, r_fwd); ledcWrite(5, r_rev); 
-    ledcWrite(6, r_fwd); ledcWrite(7, r_rev); 
+    ledcWrite(CH_FR_A, r_fwd); ledcWrite(CH_FR_B, r_rev);
+    ledcWrite(CH_RR_A, r_fwd); ledcWrite(CH_RR_B, r_rev);
 }
 
-// ==========================================
-// 4. Setup 初始化
-// ==========================================
 void setup() {
     Serial.begin(115200);
+    for(int i=0; i<8; i++) { ledcSetup(i, freq, resolution); }
+    ledcAttachPin(FL_A, CH_FL_A); ledcAttachPin(FL_B, CH_FL_B);
+    ledcAttachPin(RL_A, CH_RL_A); ledcAttachPin(RL_B, CH_RL_B);
+    ledcAttachPin(FR_A, CH_FR_A); ledcAttachPin(FR_B, CH_FR_B);
+    ledcAttachPin(RR_A, CH_RR_A); ledcAttachPin(RR_B, CH_RR_B);
 
-    pinMode(LINE_L, INPUT);
-    pinMode(LINE_M, INPUT);
-    pinMode(LINE_R, INPUT);
+    pinMode(TRIG_F, OUTPUT); pinMode(ECHO_F, INPUT);
+    pinMode(TRIG_L, OUTPUT); pinMode(ECHO_L, INPUT);
+    pinMode(TRIG_R, OUTPUT); pinMode(ECHO_R, INPUT);
 
-    // PWM 初始化
-    for (int i = 0; i < 8; i++) ledcSetup(i, freq, resolution);
-    ledcAttachPin(FL_A, 0); ledcAttachPin(FL_B, 1);
-    ledcAttachPin(RL_A, 2); ledcAttachPin(RL_B, 3);
-    ledcAttachPin(FR_A, 4); ledcAttachPin(FR_B, 5);
-    ledcAttachPin(RR_A, 6); ledcAttachPin(RR_B, 7);
-
-    pinMode(TRIG1, OUTPUT); pinMode(ECHO1, INPUT);
-    pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
-    pinMode(TRIG3, OUTPUT); pinMode(ECHO3, INPUT);
-
-    Serial.println("🔥 避障+优化回溯 终极全时四驱系统就绪!");
+    drive4WD(0, 0);
+    delay(1000);
+    Serial.println("🦁 [4WD LARGE-TURN] 大摆角爆发版点火！");
 }
 
-// ==========================================
-// 5. Loop 主逻辑
-// ==========================================
 void loop() {
-    // 【第1步】读取传感器数据
-    int rawL = analogRead(LINE_L);
-    int rawR = analogRead(LINE_R);
-    bool M  = digitalRead(LINE_M); 
+    float dist1 = getDistance(TRIG_F, ECHO_F); 
+    float dist2 = getDistance(TRIG_L, ECHO_L); 
+    float dist3 = getDistance(TRIG_R, ECHO_R); 
 
-    bool L = (rawL > D0_THRESHOLD); 
-    bool R = (rawR > D0_THRESHOLD); 
-
-    // 【第2步】更新最后的记忆方向（用来回溯寻线）
-    if (L && !R) lastDirection = 1; // 倒向左边
-    if (!L && R) lastDirection = 2; // 倒向右边
-
-    // 【第3步】读取前超声波测距
-    float distF = getDistance(TRIG1, ECHO1);
-
-    // 参数定义
-    int baseSpeed = 220; 
-    int maxSpeed = 255;    
-    int softDiff = 120; 
-    int hardRev = -180; // 暴力反转
-
-    // ==========================================
-    // 🛡️ 模块 A：10cm 紧急超声波避障（最高优先级）
-    // ==========================================
-    if (distF > 1.0 && distF <= 10.0) { // 过滤0误差，检测到10cm内的障碍
-        Serial.println("🚨 [WARNING] 发现前方障碍！执行避障急停！");
-        drive(-150, -150); // 先紧急刹车倒车
-        delay(150);
-        drive(0, 0);       // 彻底停稳
-        delay(500); 
-
-        // 读取左右超声波决定往哪拐弯绕障
-        float distL = getDistance(TRIG2, ECHO2);
-        float distR = getDistance(TRIG3, ECHO3);
-
-        if (distL > distR) {
-            drive(-150, 150); // 左边空，原地左转
-            delay(300);
-        } else {
-            drive(150, -150); // 右边空，原地右转
-            delay(300);
-        }
-        return; // 结束本次 loop，不执行底下的巡线，重新进入雷达扫描
+    // ==================================================
+    // 🟩 1. 绝对空旷判定：直接全速前冲
+    // ==================================================
+    if ((dist1 > LIMIT_FRONT || dist1 < 0) && 
+        (dist2 > LIMIT_SIDE || dist2 < 0) && 
+        (dist3 > LIMIT_SIDE || dist3 < 0)) {
+        
+        drive4WD(CRUISE_SPEED, CRUISE_SPEED);
+        delay(10);
+        return; 
     }
 
-    // ==========================================
-    // ⏱️ 模块 B：无黑线计时切换超声波导航
-    // ==========================================
-    if (L || M || R) {
-        noLineStartTime = 0; 
-        forceUltrasoundMode = false; 
+    // ==================================================
+    // 🚨 2. 前方极限贴脸（F <= 7cm）：大幅度原地坦克转向
+    // ==================================================
+    if (dist1 > 0 && dist1 <= LIMIT_FRONT) {
+        Serial.println("🛑 [CRITICAL FRONT] 极限贴脸！极限大角度原地转向！");
+        
+        bool turnLeft = true;
+        if (dist2 > 0 && dist3 > 0) {
+            turnLeft = (dist2 > dist3);
+        } else if (dist2 < 0) { 
+            turnLeft = true;
+        } else if (dist3 < 0) { 
+            turnLeft = false;
+        }
+
+        // 【大摆角修改 A】：速度拉满到绝对极限 ±255，同时强制执行时间从 200ms 延长到 380ms！
+        // 这一刀下去，车头会有一个非常极其暴力且明显的甩头大动作
+        unsigned long startTime = millis();
+        while(millis() - startTime < 380) { 
+            if (turnLeft) {
+                drive4WD(REV_SPEED, MAX_SPEED); // 左后退，右前进 -> 大力左转
+            } else {
+                drive4WD(MAX_SPEED, REV_SPEED); // 左前进，右后退 -> 大力右转
+            }
+            delay(5);
+        }
+        drive4WD(0, 0); delay(40); // 刹车死锁稳定
+        return;
+    }
+
+    // ==================================================
+    // 🚨 3. 左右侧极限贴墙（L/R <= 2cm）：大动作弹开避让
+    // ==================================================
+    // 【大摆角修改 B】：侧边急救闪避动作幅度加大，内侧轮直接给倒车电压（180 vs -100）
+    if (dist2 > 0 && dist2 <= LIMIT_SIDE) {
+        Serial.println("⚠️ [ESCAPE] 左侧太近！强力扭头向右弹开！");
+        drive4WD(MAX_SPEED, -100); 
+        delay(150); // 持续时间延长，确保大幅度弹开
+        return;
+    }
+    if (dist3 > 0 && dist3 <= LIMIT_SIDE) {
+        Serial.println("⚠️ [ESCAPE] 右侧太近！强力扭头向左弹开！");
+        drive4WD(-100, MAX_SPEED); 
+        delay(150); 
+        return;
+    }
+
+    // ==================================================
+    // 🏎️ 4. 正常靠墙纠偏：高灵敏度大动作微调
+    // ==================================================
+    if (dist2 > 0 && dist3 > 0) {
+        float error = dist2 - dist3;
+        // 【大摆角修改 C】：系数从 10 暴增到 20！
+        // 只要两边有一点不对等，四驱两侧立刻拉开高达 100+ 的差速，动作极其敏感利落
+        int diff = error * 20; 
+        diff = constrain(diff, -100, 100); // 允许更大的修正差速上限
+        drive4WD(BASE_SPEED + diff, BASE_SPEED - diff);
     } else {
-        if (noLineStartTime == 0) noLineStartTime = millis(); 
-        if (millis() - noLineStartTime >= 10000) forceUltrasoundMode = true; 
+        drive4WD(BASE_SPEED, BASE_SPEED);
     }
 
-    // ==========================================
-    // 🤖 模块 C：运动控制状态机
-    // ==========================================
-    if (forceUltrasoundMode) {
-        // 🛰️ 迷宫自主导航
-        float distL = getDistance(TRIG2, ECHO2);
-        float distR = getDistance(TRIG3, ECHO3);
-
-        if (distF < 25.0) { // 前方有墙
-            if (distL > distR) {
-                drive(-160, 160); // 左转
-            } else {
-                drive(160, -160); // 右转
-            }
-            delay(200);
-        } else {
-            drive(180, 180); // 直行
-        }
-    } 
-    else {
-        // 🛣️ 正常循线
-        
-        if (!L && M && !R) {
-            drive(baseSpeed, baseSpeed); // 直行
-        }
-        else if (L && M && !R) {
-            drive(softDiff, maxSpeed); // 微偏左修正
-        }
-        else if (!L && M && R) {
-            drive(maxSpeed, softDiff); // 微偏右修正
-        }
-        
-        // 🚨 触发直角左弯 (1 0 0)
-        else if (L && !M && !R) {
-            drive(hardRev, maxSpeed); 
-            delay(70); 
-        }
-        
-        // 🚨 触发直角右弯 (0 0 1)
-        else if (!L && !M && R) {
-            drive(maxSpeed, hardRev); 
-            delay(70); 
-        }
-        
-        // ❓ 物理回溯搜线 (0 0 0) - 当车子冲出赛道全白时
-        else if (!L && !M && !R) {
-            int searchSpeed = 110; // 降低搜线速度，防止惯性划过黑线而识别不到
-
-            if (lastDirection == 1) {
-                // 刚才往左边倒，说明黑线其实被甩在了右侧！
-                drive(searchSpeed, -searchSpeed); // 原地右转去找线
-            } else if (lastDirection == 2) {
-                // 刚才往右边倒，说明黑线其实被甩在了左侧！
-                drive(-searchSpeed, searchSpeed); // 原地左转去找线
-            } else {
-                drive(-110, -110); // 如果不知道在哪，开启倒车回溯！
-            }
-        }
-        else {
-            drive(baseSpeed, baseSpeed); 
-        }
-    }
-
-    // 调试打印
-    Serial.printf("L(ADC):%d M:%d R(ADC):%d | F:%.1f | %s\n", 
-                  rawL, M, rawR, distF, forceUltrasoundMode ? "ULTRA" : "LINE");
-    delay(10); 
+    delay(15);
 }
